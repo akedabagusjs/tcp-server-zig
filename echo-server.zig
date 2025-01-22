@@ -21,13 +21,13 @@ pub fn main() !void {
 pub fn handleConn(conn: Connection) !void {
     print("accepted connection from: {}\n", .{conn.address});
     _ = try conn.stream.write("welcome to echo server.\n");
-
-    var buffer: [4096]u8 = undefined;
-    while (true) {
-        const bytes_recv = try conn.stream.read(&buffer);
-        const chunk = buffer[0..bytes_recv];
-        if (chunk.len == 0) break;
-        print("message: {s}", .{chunk});
-        _ = try conn.stream.writer().print("reply: {s}", .{chunk});
+    defer {
+        conn.stream.close();
+        print("closed connection from: {}\n", .{conn.address});
     }
+
+    conn.stream.reader().streamUntilDelimiter(conn.stream.writer(), '\n', null) catch |e| switch (e) {
+        error.EndOfStream => print("error reading stream: {}", .{e}),
+        else => unreachable,
+    };
 }
