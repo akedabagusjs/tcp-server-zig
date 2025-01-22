@@ -15,20 +15,26 @@ pub fn main() !void {
             const thread = try Thread.spawn(.{}, handleConn, .{conn});
             thread.detach();
         } else |e| {
-            print("error accpeting connection: {}\n", .{e});
+            print("error accpeting connection {}\n", .{e});
         }
     }
 }
 
 pub fn handleConn(conn: Connection) !void {
-    print("accepted connection from: {}\n", .{conn.address});
-    _ = try conn.stream.write("welcome to echo server.\n");
+    print("accepted connection from {}\n", .{conn.address});
     defer {
         conn.stream.close();
         print("closed connection from: {}\n", .{conn.address});
     }
 
-    conn.stream.reader().streamUntilDelimiter(conn.stream.writer(), '\n', null) catch |e| {
-        print("error reading from or writing to stream: {}\n", .{e});
-    };
+    var buffer: [4096]u8 = undefined;
+    while (true) {
+        const bytes_received = try conn.stream.read(&buffer);
+        const chunk = buffer[0..bytes_received];
+        if (chunk.len == 0) {
+            print("done reading from {}\n", .{conn.address});
+            break;
+        }
+        _ = try conn.stream.write(chunk);
+    }
 }
