@@ -6,10 +6,12 @@ const eql = std.mem.eql;
 const print = std.debug.print;
 const sqrt = std.math.sqrt;
 const modf = std.math.modf;
+const json = std.json;
+const BigInt = i256;
 
 const Request = struct {
     method: []const u8,
-    number: f64,
+    number: BigInt,
 };
 
 pub fn main() !void {
@@ -32,9 +34,9 @@ pub fn main() !void {
 }
 
 fn serve(allocator: Allocator, conn: Connection) !void {
-    print("accepting connection from {}\n", .{conn.address});
+    print("{}> start serving..\n", .{conn.address});
     defer {
-        print("closing connection from {}\n", .{conn.address});
+        print("{}> closed connection\n", .{conn.address});
         conn.stream.close();
     }
 
@@ -46,30 +48,63 @@ fn serve(allocator: Allocator, conn: Connection) !void {
             error.EndOfStream => break,
             else => unreachable,
         };
-
-        const parsed = std.json.parseFromSlice(Request, allocator, arr.items, .{ .ignore_unknown_fields = true }) catch |e| {
-            print("failed to parse json: {}\n", .{e});
+        print("{}> received request: {s}\n", .{conn.address, arr.items});
+        const request = parseRequest(allocator, arr.items) catch |e| {
+            print("{}> invalid request: {}\n", .{conn.address, e});
             try handleMalformedRequest(conn);
             break;
         };
 
-        if (!eql(u8, parsed.value.method, "isPrime")) {
-            print("method is not 'isPrime'\n", .{});
-            try handleMalformedRequest(conn);
-            break;
+        var is_prime: bool = false;
+        if (request.number > 0) {
+            is_prime = isNumPrime(request.number);
         }
 
-        const num = parsed.value.number;
-        const has_frac = modf(num).fpart != 0.0;
-        if ( num < 0 or has_frac) {
-            try handleConformingRequest(conn, false);
-            continue;
-        }
-
-        try handleConformingRequest(conn, isNumPrime(@as(u64, @intFromFloat(parsed.value.number))));
-
+        try handleConformingRequest(conn, is_prime);
         arr.clearRetainingCapacity();
     }
+}
+
+fn parseRequest(allocator: Allocator, message: []u8) !Request {
+    var request: Request = undefined;
+
+    const parsed = try json.parseFromSlice(
+        json.Value,
+        allocator,
+        message,
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+
+    const method: ?json.Value = parsed.value.object.get("method");
+    const number: ?json.Value = parsed.value.object.get("number");
+    if (method == null or number == null) {
+        return error.ParseError;
+    }
+    switch (method.?) {
+        .string => {
+            if (!eql(u8, method.?.string, "isPrime")) {
+                return error.ParseError;
+            }
+            request.method = "isPrime";
+        },
+        else => return error.ParseError,
+    }
+    switch (number.?) {
+        .integer => request.number = number.?.integer,
+        .float => request.number = @intFromFloat(number.?.float),
+        .number_string => {
+            print("detected number_string\n", .{});
+            var big = try std.math.big.int.Managed.init(allocator);
+            defer big.deinit();
+
+            try big.setString(10, number.?.number_string);
+            request.number = try big.to(BigInt);
+        },
+        else => return error.ParseError,
+    }
+
+    return request;
 }
 
 fn handleMalformedRequest(conn: Connection) !void {
@@ -80,14 +115,12 @@ fn handleConformingRequest(conn: Connection, isPrime: bool) !void {
     _ = try conn.stream.writer().print("{{\"method\":\"isPrime\",\"prime\":{}}}\n", .{isPrime});
 }
 
-fn isNumPrime(n: u64) bool {
+fn isNumPrime(n: BigInt) bool {
     if (n <= 1) return false;
-    if (n == 2 or n == 3) return true;
-    if (n % 2 == 0 or n % 3 == 0) return false;
 
-    var i: u64 = 5;
-    while (i <= sqrt(n)) : (i += 6) {
-        if (n % i == 0 or n % (i + 2) == 0) return false;
+    var i: isize = 2;
+    while (i * i <= n) : (i += 1) {
+        if (@rem(n, i) == 0) return false;
     }
 
     return true;
