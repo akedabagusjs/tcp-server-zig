@@ -139,5 +139,5 @@ fn handleQuery(id: u32, conn: Connection) !void {
     const res = db.query(id, min, max);
     print("{}> query({}, {}) = {}\n", .{id, min, max, res});
 
-    // TODO: respond back to client
+    try conn.stream.writer().writeInt(i32, res, .big);
 }
