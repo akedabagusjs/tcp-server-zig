@@ -40,18 +40,18 @@ const db = struct {
     pub fn query(id: u32, min: i32, max: i32) i32 {
         const data = session.get(id).?;
 
-        var sum: i32 = 0;
-        var len: i32 = 0;
+        var sum: i128 = 0;
+        var len: usize = 0;
         var it = data.iterator();
         while (it.next()) |kv| {
             if (kv.key_ptr.* >= min and kv.key_ptr.* <= max) {
-                sum += kv.value_ptr.*;
+                sum += @intCast(kv.value_ptr.*);
                 len += 1;
             }
         }
 
         if (len == 0) return 0;
-        return @as(i32, @divFloor(sum, len));
+        return @as(i32, @truncate(@divFloor(sum, len)));
     }
 
     pub fn getId() u32 {
