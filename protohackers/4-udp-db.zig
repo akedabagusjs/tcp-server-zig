@@ -3,7 +3,6 @@ const posix = std.posix;
 const fd_t = posix.fd_t;
 const socket = posix.socket;
 const sendto = posix.sendto;
-const Thread = std.Thread;
 const print = std.debug.print;
 const Map = std.StringHashMap;
 const Allocator = std.mem.Allocator;
@@ -33,14 +32,12 @@ pub fn main() !void {
 const DB = struct {
     allocator: Allocator,
     sock: fd_t,
-    lock: Thread.RwLock,
     entries: Map([]const u8),
 
     pub fn init(allocator: Allocator, sock: fd_t) DB {
         return .{
             .allocator = allocator,
             .sock = sock,
-            .lock = Thread.RwLock{},
             .entries = Map([]const u8).init(allocator),
         };
     }
@@ -63,30 +60,26 @@ const DB = struct {
     pub fn handle(self: *DB, msg: []const u8, dst: posix.sockaddr, dst_len: posix.socklen_t) !void {
         if (std.mem.indexOf(u8, msg, "=")) |eq_index| {
             const key = msg[0..eq_index];
-            const val = msg[eq_index+1..msg.len-1];
+            const val = msg[eq_index+1..];
             try self.insert(key, val);
-            print("insert '{s}'='{s}'\n", .{key, val});
+            print("<- '{s}'='{s}'\n", .{key, val});
         } else {
-            const key = msg[0..msg.len-1];
-            const val = self.query(key);
-            const resp = try allocPrint(self.allocator, "{s}={s}\n", .{key, val});
-            print("query '{s}'; resp {s}", .{msg[0..msg.len-1], resp});
+            const val = self.query(msg);
+            const resp = try allocPrint(self.allocator, "{s}={s}", .{msg, val});
+            print("<- '{s}'\n", .{msg});
+            print("-> '{s}'='{s}'\n", .{msg, val});
             _ = try sendto(self.sock, resp, 0, &dst, dst_len);
         }
     }
 
     pub fn insert(self: *DB, key: []const u8, val: []const u8) !void {
-        self.lock.lock();
-        defer self.lock.unlock();
+        if (eql(u8, key, "version")) return;
 
         const dupe = try std.mem.Allocator.dupe(self.allocator, u8, val);
         try self.entries.put(key, dupe);
     }
 
     pub fn query(self: *DB, key: []const u8) []const u8 {
-        self.lock.lock();
-        defer self.lock.unlock();
-
         if (eql(u8, key, "version")) {
             return "Ken's Key-Value Store 1.0";
         }
