@@ -32,13 +32,13 @@ pub fn main() !void {
 const DB = struct {
     allocator: Allocator,
     sock: fd_t,
-    entries: Map([]const u8),
+    entries: Map([]u8),
 
     pub fn init(allocator: Allocator, sock: fd_t) DB {
         return .{
             .allocator = allocator,
             .sock = sock,
-            .entries = Map([]const u8).init(allocator),
+            .entries = Map([]u8).init(allocator),
         };
     }
 
@@ -51,10 +51,8 @@ const DB = struct {
         var dst: posix.sockaddr = undefined;
         var dst_len: posix.socklen_t = @sizeOf(posix.sockaddr);
         const len = try posix.recvfrom(self.sock, &buf, 0, &dst, &dst_len);
-        var msg: [1024]u8 = undefined;
-        @memcpy(msg[0..len], buf[0..len]);
 
-        try self.handle(msg[0..len], dst, dst_len);
+        try self.handle(buf[0..len], dst, dst_len);
     }
 
     pub fn handle(self: *DB, msg: []const u8, dst: posix.sockaddr, dst_len: posix.socklen_t) !void {
@@ -75,8 +73,9 @@ const DB = struct {
     pub fn insert(self: *DB, key: []const u8, val: []const u8) !void {
         if (eql(u8, key, "version")) return;
 
-        const dupe = try std.mem.Allocator.dupe(self.allocator, u8, val);
-        try self.entries.put(key, dupe);
+        const dupe_key = try std.mem.Allocator.dupe(self.allocator, u8, key);
+        const dupe_val = try std.mem.Allocator.dupe(self.allocator, u8, val);
+        try self.entries.put(dupe_key, dupe_val);
     }
 
     pub fn query(self: *DB, key: []const u8) []const u8 {
